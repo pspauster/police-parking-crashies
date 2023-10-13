@@ -1,0 +1,57 @@
+---
+title: "analysis"
+author: "Patrick Spauster"
+date: '2023-10-13'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(readxl)
+library(RSocrata)
+library(sf)
+library(leaflet)
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+nypd_parking <- read_excel("NYC_Parking_Cleaned.xlsx", sheet = "Data_Sort")
+
+nypd_parking_year <- nypd_parking %>% 
+  pivot_longer(starts_with("20"), names_to = "year", values_to = "parking status")
+
+```
+
+```{r}
+crash_data <- read.socrata("https://data.cityofnewyork.us/resource/h9gi-nx95.csv?$where=crash_date > '2006-12-31T00:00:00.000'")
+
+crash_data_sf <- crash_data %>% 
+  filter(!is.na(latitude)) %>% 
+  st_as_sf(coords = c("longitude", "latitude"))
+```
+
+```{r}
+nypd_parking_sf <- nypd_parking_year %>% 
+  st_as_sf(coords = c("x", "y")) %>% 
+  st_set_crs(4326)
+
+nypd_parking_buffered <- nypd_parking_sf %>% 
+  st_buffer(dist = 100)
+
+```
+
+```{r}
+
+leaflet(options = leafletOptions(crs = leafletCRS(code = "EPSG:2263"))) %>% 
+  addProviderTiles(provider = "CartoDB.Positron") %>% 
+  addPolygons(data = nypd_parking_buffered,
+              #color = "blue",
+              fillOpacity = 0.5)
+
+```
+
+
+
