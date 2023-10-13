@@ -21,7 +21,9 @@ knitr::opts_chunk$set(echo = TRUE)
 nypd_parking <- read_excel("NYC_Parking_Cleaned.xlsx", sheet = "Data_Sort")
 
 nypd_parking_year <- nypd_parking %>% 
-  pivot_longer(starts_with("20"), names_to = "year", values_to = "parking status")
+  pivot_longer(starts_with("20"), names_to = "year", values_to = "parking status") %>% 
+  mutate(year = as.numeric(year)) %>% 
+  filter(year >= 2012)
 
 ```
 
@@ -29,8 +31,10 @@ nypd_parking_year <- nypd_parking %>%
 crash_data <- read.socrata("https://data.cityofnewyork.us/resource/h9gi-nx95.csv?$where=crash_date > '2006-12-31T00:00:00.000'")
 
 crash_data_sf <- crash_data %>% 
-  filter(!is.na(latitude)) %>% 
-  st_as_sf(coords = c("longitude", "latitude"))
+  mutate(crash_year = lubridate::year(crash_date)) %>% 
+  filter(!is.na(latitude), crash_year %in% nypd_parking_year$year) %>% 
+  st_as_sf(coords = c("longitude", "latitude")) %>% 
+  st_set_crs(4326)
 ```
 
 ```{r}
@@ -39,7 +43,7 @@ nypd_parking_sf <- nypd_parking_year %>%
   st_set_crs(4326)
 
 nypd_parking_buffered <- nypd_parking_sf %>% 
-  st_buffer(dist = 100)
+  st_buffer(dist = 75)
 
 ```
 
@@ -51,6 +55,53 @@ leaflet(options = leafletOptions(crs = leafletCRS(code = "EPSG:2263"))) %>%
               #color = "blue",
               fillOpacity = 0.5)
 
+```
+
+#get stats by year
+```{r}
+parking_crash_join <- nypd_parking_buffered %>% 
+  st_intersection(crash_data_sf)
+
+
+```
+
+
+```{r}
+
+crash_data_split <- split(crash_data_sf %>% filter(crash_year %in% nypd_parking_buffered$year), crash_data_sf$crash_year)
+parking_data_split <- split(nypd_parking_buffered, nypd_parking_buffered$year)
+
+parking_crash_joined <- map2_dfr(
+  .x = crash_data_split,
+  .y = parking_data_split,
+  ~mutate(.y, crashes = lengths(st_intersect(.y,.x)))
+)
+
+parking_crash_joined_full <- map2_dfr(
+  .x = crash_data_split,
+  .y = parking_data_split,
+  ~st_intersection(.y,.x))
+
+
+```
+
+```{r}
+
+parking_crash_summary <- parking_crash_joined %>% 
+  as.data.frame() %>% 
+  group_by(year) %>% 
+  summarize(crashes = sum(crashes)) %>% 
+  mutate(geography = "near nypd parking")
+  
+
+overall_crash_summary <- crash_data_sf %>% 
+  as.data.frame() %>% 
+  group_by(crash_year) %>% 
+  summarize(crashes = n()) %>% 
+  rename(year = crash_year) %>% 
+  mutate(geography = "citywide")
+
+parking_city_sum <- bind_rows(overall_crash_summary, parking_crash_summary)
 ```
 
 
